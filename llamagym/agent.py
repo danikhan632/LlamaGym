@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import List, Dict
-
+import sys
 import gymnasium as gym
 import torch
 from trl import (
@@ -9,7 +9,13 @@ from trl import (
     create_reference_model,
 )
 
-
+def printc(obj, color="cyan"):
+    color_code = {
+        "black": "30", "red": "31", "green": "32", "yellow": "33",
+        "blue": "34", "magenta": "35", "cyan": "36", "white": "37"
+    }
+    colored_text = f"\033[{color_code[color]}m{obj}\033[0m" if color in color_code else obj
+    print(colored_text)
 class Agent(ABC):
     def __init__(
         self, model, tokenizer, device, generate_config_dict=None, ppo_config_dict=None
@@ -23,7 +29,7 @@ class Agent(ABC):
                 "temperature": 0.9,
             }
         if ppo_config_dict is None:
-            ppo_config_dict = {"batch_size": 16, "mini_batch_size": 16}
+            ppo_config_dict = {"batch_size": 1, "mini_batch_size": 1}
 
         self.model = model
         self.tokenizer = tokenizer
@@ -57,35 +63,35 @@ class Agent(ABC):
 
     def llm(self, messages: List[Dict[str, str]]) -> str:
         prompt = self.tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
+            messages, tokenize=False, add_reasoning_prompt=True
         )
+        printc(prompt)
+        
+        
         inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
+        config_params = {
+            key.split("/")[-1]: value 
+            for key, value in self.generate_config_dict.items()
+        }
         generate_ids = self.model.generate(
             inputs=inputs.input_ids,
-            **{
-                key.split("/")[-1]: value
-                for key, value in self.generate_config_dict.items()
-            }
+            **config_params  
         )
-        outputs = self.tokenizer.batch_decode(
-            generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False
-        )
-        response = outputs[0].split("[/INST]")[-1].strip()
 
-        return response
+        reasoning_output = self.tokenizer.decode(generate_ids[0, inputs.input_ids.shape[1]:], skip_special_tokens=True)
+        messages.append({"role": "reasoning", "content": reasoning_output})
+        printc(reasoning_output,'red')
+        
+        return messages
 
     def act(self, observation):
         message = self.format_observation(observation)
         self.current_episode_messages += [{"role": "user", "content": message}]
 
         response = self.llm(self.current_episode_messages)
-        try:
-            action = self.extract_action(response)
-        except Exception as e:
-            return None
 
-        self.current_episode_messages += [{"role": "assistant", "content": response}]
-        return action
+        self.current_episode_messages = response
+        return response
 
     def assign_reward(self, reward):
         self.current_episode_rewards.append(reward)
@@ -164,5 +170,6 @@ class Agent(ABC):
 
         train_stats = self.ppo_trainer.step(queries, responses, rewards)
         torch.cuda.empty_cache()
-
+        printc(train_stats['objective/kl'],'magenta')
+        
         return train_stats

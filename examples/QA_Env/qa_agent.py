@@ -26,17 +26,17 @@ class QAAgent(Agent):
 
 if __name__ == "__main__":
     hyperparams = {
-        "model_name": "meta-llama/Llama-2-7b-chat-hf",
+        "model_name": "KingNish/Reasoning-Llama-3b-v0.2",
         "lora/r": 16,
         "lora/lora_alpha": 32,
         "lora/lora_dropout": 0.05,
         "lora/bias": "none",
         "lora/task_type": "CAUSAL_LM",
         "load_in_8bit": True,
-        "batch_size": 8,
+        "batch_size": 1,
         "seed": 42069,
         "episodes": 5000,
-        "generate/max_new_tokens": 32,
+        "generate/max_new_tokens": 100,
         "generate/do_sample": True,
         "generate/top_p": 0.6,
         "generate/top_k": 0,
@@ -86,16 +86,13 @@ agent = QAAgent(
 env = QAEnv()
 for episode in trange(hyperparams["episodes"]):
     observation, info = env.reset()
+    action = agent.act(observation)
+    wandb.log({"action": action})
 
-    done = False
+    observation, reward, terminated, truncated, info = env.step(action)
+    agent.assign_reward(reward)
+    print(agent.current_episode_messages)
 
-    while not done:
-        action = agent.act(observation)
-        wandb.log({"action": action})
-        print(action)
-        observation, reward, terminated, truncated, info = env.step(action)
-        agent.assign_reward(reward)
-        done = terminated
 
     episode_stats = {
         "episode": episode,
